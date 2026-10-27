@@ -10,11 +10,13 @@ sending domain while nobody's watching.
 import html
 import logging
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 from harvey.brain import Brain, BrainUnavailable
 from harvey.config import (
     DEFAULT_OPT_OUT_LINE, HarveyConfig, EnvConfig, compliance_of, legacy_sending_held,
+    writing_language_rule,
     live_do_not_contact,
 )
 from harvey.gate import autopilot_review, do_not_contact_match, pre_send_check
@@ -71,17 +73,59 @@ OPT_OUT_PATTERNS = (
     "never contact",
     "delete my info",
     "delete my data",
+    # Spanish. Accents are folded before matching, so these are written
+    # without them ("envie" also matches "envíe").
+    "dame de baja",
+    "darme de baja",
+    "deme de baja",
+    "denme de baja",
+    "me doy de baja",
+    "dar de baja mi correo",
+    "no me escriba",
+    "no me escribas",
+    "no me escriban",
+    "no vuelva a escribir",
+    "no vuelvas a escribir",
+    "no vuelvan a escribir",
+    "no me envie",
+    "no me envies",
+    "no me envien",
+    "no me contacte",
+    "no me contactes",
+    "no me contacten",
+    "no me interesa",
+    "no nos interesa",
+    "deja de escribirme",
+    "deje de escribirme",
+    "dejen de escribirme",
+    "deja de enviarme",
+    "deje de enviarme",
+    "dejen de enviarme",
+    # Not "sacame de": "sácame de dudas" asks a question.
+    "sacame de tu lista",
+    "sacame de su lista",
+    "saquenme de su lista",
+    "quitame de tu lista",
+    "quitame de su lista",
+    "quitenme de su lista",
+    "eliminen mis datos",
+    "borren mis datos",
 )
 # "No thanks" (what cold email's footer asks for) as a phrase: not "no
 # Thanksgiving", "Bruno / Thanks," or "yes or no, thanks".
 # Checked one line at a time: "...the answer is no / Thanks!" is a sign-off.
 NO_THANKS_RE = re.compile(
     r"(?<!\bor )\bno,?[ \t]+thank(?:s|[ \t]+you)\b(?![ \t]+(?:needed|necessary|required))")
+# "No gracias", the same way: not "no, gracias a ti" or "sí o no, gracias".
+NO_GRACIAS_RE = re.compile(r"(?<!\bo )\bno,?[ \t]+gracias\b(?![ \t]+a\b)")
 # A reply that says only this (signature aside) is an opt-out ("Reply STOP").
+# "baja" and "alto" only on their own: inside a sentence they mean other things.
 BARE_OPT_OUTS = {"stop", "unsubscribe", "remove", "remove me", "opt out",
-                 "no thanks", "no thank you"}
+                 "no thanks", "no thank you",
+                 "baja", "alto", "no gracias", "dar de baja", "darme de baja"}
 _MOBILE_SIGNATURE_RE = re.compile(
-    r"^[ \t]*(?:sent from my \w[^\n]*|get outlook for \w[^\n]*|sent from \w+ mail[^\n]*)$",
+    r"^[ \t]*(?:sent from my \w[^\n]*|get outlook for \w[^\n]*|sent from \w+ mail[^\n]*"
+    r"|enviado desde mi \w[^\n]*|obtener outlook para \w[^\n]*)$",
     re.IGNORECASE | re.MULTILINE)
 # A line of their reply at least this long that repeats what Harvey wrote
 # for this person is our text, not theirs. Shorter unmarked lines are always
@@ -143,6 +187,13 @@ class OurText:
         return "\n".join(kept)
 
 
+def _fold(text: str) -> str:
+    """Accents removed ("envíe" -> "envie"), so Spanish phrases match
+    however the reply was typed."""
+    return "".join(c for c in unicodedata.normalize("NFD", text)
+                   if unicodedata.category(c) != "Mn")
+
+
 def _opt_out_reason(their_text: str, own_words: str) -> dict | None:
     """Which opt-out rule their reply trips, and on what words, or None.
 
@@ -150,17 +201,18 @@ def _opt_out_reason(their_text: str, own_words: str) -> dict | None:
     reply without the quote. Longer phrases match across a line wrap; "no
     thanks" only within a line. The result is kept with the opt-out so a
     human can see why Harvey stopped, and undo it if it was wrong."""
-    flat = _flat(their_text)
+    flat = _fold(_flat(their_text))
     for p in OPT_OUT_PATTERNS:
         if p in flat:
             return {"rule": "phrase", "matched": p,
                     "why": f'Their reply contains "{p}".'}
     for line in their_text.split("\n"):
-        m = NO_THANKS_RE.search(_flat(line))
+        folded = _fold(_flat(line))
+        m = NO_THANKS_RE.search(folded) or NO_GRACIAS_RE.search(folded)
         if m:
             return {"rule": "no_thanks", "matched": m.group(0),
                     "why": f'Their reply says "{m.group(0)}", what the opt-out line asks for.'}
-    bare = _flat(_MOBILE_SIGNATURE_RE.sub("", own_words or ""))
+    bare = _fold(_flat(_MOBILE_SIGNATURE_RE.sub("", own_words or "")))
     bare = re.sub(r"[^\w\s-]", "", bare).strip()
     if bare in BARE_OPT_OUTS:
         return {"rule": "only_words", "matched": bare,
@@ -187,6 +239,17 @@ ESCALATION_PATTERNS = (
     "gdpr",
     "can-spam",
     "blacklist",
+    # Spanish (matched with accents folded)
+    # Not "demanda" alone: "hay mucha demanda" is about the market.
+    "abogado",
+    "demandar",
+    "acoso",
+    "acosando",
+    "denuncia",
+    "denunciar",
+    "profeco",
+    "reportar como spam",
+    "lista negra",
 )
 
 
@@ -465,7 +528,7 @@ class Handler:
         reply_text = ours.remove(stripped).strip() or stripped
 
         if prospect.status == "opted_out":
-            escalate = any(p in keyword_text for p in ESCALATION_PATTERNS)
+            escalate = any(p in _fold(keyword_text) for p in ESCALATION_PATTERNS)
             await self._record_after_opt_out(prospect, reply_text, campaign_id, escalate)
             return
 
@@ -487,7 +550,7 @@ class Handler:
         opt_out = _opt_out_reason(their_text, reply_text)
         if opt_out:
             intent = "unsubscribe"
-        elif any(p in keyword_text for p in ESCALATION_PATTERNS):
+        elif any(p in _fold(keyword_text) for p in ESCALATION_PATTERNS):
             intent = "escalate"
         else:
             intent = await self._classify_intent(reply_text, prospect)
@@ -960,6 +1023,7 @@ Respond with ONLY the category label, nothing else."""
             prompt = f"""You are {self.config.persona.name}, {self.config.persona.role} at {self.config.persona.company}.
 Your tone is: {self.config.persona.tone}
 Product: {self.config.product.name} — {self.config.product.description}"""
+        prompt += writing_language_rule(self.config)
 
         # Inject objection handling + sales methodology skills
         if self.skills:

@@ -43,6 +43,14 @@ icp:
   # "Head of Growth" is shopping for growth tooling). Used for careers-page
   # scanning and job-board discovery. Empty = fall back to titles above.
   hiring_signals: []
+  # The language your prospects read and search in ("en", "es"), and their
+  # two-letter country ("us", "mx"). With "es", emails and replies are
+  # written in Spanish, searches ask for Spanish results, and Spanish
+  # opt-outs ("no gracias", "dame de baja") are honoured. For Spanish, also
+  # set compliance.opt_out_line, e.g.
+  #   'Si no te interesa, responde "no gracias" y no vuelvo a escribirte.'
+  language: "en"
+  country: ""
 
 channels:
   email:

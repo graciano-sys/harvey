@@ -75,6 +75,62 @@ class ICPConfig(BaseModel):
     # Each variant runs in every city alongside the industry itself, so the
     # estimate grows with it. Empty → each industry is its own one search.
     keyword_variants: dict[str, list[str]] = {}
+    # The language prospects read and search in, as a two-letter code ("en",
+    # "es"). Emails and replies are written in it, and web searches ask for
+    # it. country: the prospects' two-letter country code ("mx", "us"), for
+    # searches with no city or coordinate. Blank means the United States.
+    language: str = "en"
+    country: str = ""
+
+    @field_validator("language", "country", mode="before")
+    @classmethod
+    def _lower_code(cls, v):
+        return "" if v is None else str(v).strip().lower()
+
+
+# How each supported language is named to the model, and what it adds to the
+# English writing rules.
+LANGUAGE_RULES = {
+    "es": (
+        "Mexican Spanish",
+        '- Address the prospect as "usted" unless they write to you with "tú".\n'
+        "- Every banned phrase and spam word above is banned in its Spanish form too "
+        '("gratis", "sin costo", "garantizado", "oferta", "descuento", "promoción", '
+        '"urgente", "no te lo pierdas", "haz clic aquí", "espero que se encuentre bien", '
+        '"solo quería", "me pongo en contacto porque").\n'
+        "- Use inverted marks where Spanish needs them (¿...? ¡...!), but still no "
+        "exclamation marks at all.\n"
+        "- Write the way a Mexican professional types a short email, not a translation "
+        "from English.",
+    ),
+}
+
+
+def writing_language_rule(config) -> str:
+    """The block that makes the model write in the prospects' language, or
+    "" for English (the prompts are already written for it)."""
+    icp = getattr(config, "icp", None)
+    lang = (getattr(icp, "language", "") or "en").lower()
+    if lang == "en":
+        return ""
+    name, extra = LANGUAGE_RULES.get(lang, (f'the language with code "{lang}"', ""))
+    rule = (f"\n\nLANGUAGE: Write every subject line, email and reply in {name}. "
+            "Every rule above still applies in that language: the word limits, one "
+            "question, plain text, no em dashes, no exclamation marks, lowercase subject "
+            "lines, nothing invented. Merge variables like {{first_name}} stay exactly "
+            "as they are.")
+    return rule + ("\n" + extra if extra else "")
+
+
+def accept_language(config) -> str:
+    """The Accept-Language header for reading prospects' websites."""
+    icp = getattr(config, "icp", None)
+    lang = (getattr(icp, "language", "") or "en").lower()
+    country = (getattr(icp, "country", "") or "").upper()
+    if lang == "en":
+        return "en-US,en;q=0.9"
+    region = f"{lang}-{country}," if country else ""
+    return f"{region}{lang};q=0.9,en;q=0.5"
 
 
 class WarmupConfig(BaseModel):
@@ -374,11 +430,12 @@ class PreclearedConfig(BaseModel):
 
 DEFAULT_OPT_OUT_LINE = 'Not interested? Reply "no thanks" and I won\'t email again.'
 # The replies the Handler always honours as an opt-out on their own; an
-# opt_out_line must ask for one of them ("Reply STOP", 'reply "no thanks"').
+# opt_out_line must ask for one of them ("Reply STOP", 'reply "no thanks"',
+# 'responde "no gracias"').
 OPT_OUT_WORDS = ("no thanks", "no thank you", "unsubscribe", "stop", "remove me",
-                 "opt out")
+                 "opt out", "no gracias", "baja")
 _ASKS_FOR_OPT_OUT_RE = re.compile(
-    r"\breply(?:\s+with)?\s*[\"'\u201c\u2018]?\s*(?:"
+    r"\b(?:reply|respond[ea]|contest[ae])(?:\s+(?:with|con))?\s*[\"'\u201c\u2018]?\s*(?:"
     + "|".join(re.escape(w) for w in OPT_OUT_WORDS) + r")\b", re.IGNORECASE)
 
 

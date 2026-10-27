@@ -38,9 +38,9 @@ from bs4 import BeautifulSoup
 
 from harvey.brain import Brain
 from harvey.collectors import people as people_mod
-from harvey.collectors.discover import site_name_from_html
+from harvey.collectors.discover import serper_locale, site_name_from_html
 from harvey.collectors.profile import _reads_like_title, looks_like_challenge
-from harvey.config import HarveyConfig, EnvConfig
+from harvey.config import HarveyConfig, EnvConfig, accept_language
 from harvey.integrations.email_finder import (
     DEFAULT_PATTERN, SMALL_BUSINESS_PATTERN, find_email, site_email_evidence,
     verify_published_address,
@@ -79,6 +79,8 @@ MAX_SITE_PAGES = 6
 # inbox pages, the check that a second domain is theirs — shares this cap.
 MAX_SITE_FETCHES = 10
 FALLBACK_SITE_PATHS = ("/about", "/about-us", "/team", "/our-team", "/contact", "/contact-us")
+# The same pages on a Spanish-language site (icp.language: es).
+FALLBACK_SITE_PATHS_ES = ("/nosotros", "/quienes-somos", "/equipo", "/contacto")
 # Named decision makers taken from one company per visit, likeliest first.
 MAX_CONTACTS_PER_COMPANY = 2
 # With no evidence of a company's email format, guess first@ only when
@@ -249,7 +251,7 @@ class Scout:
         headers = {
             "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Language": accept_language(self.config),
         }
         if extra:
             headers.update(extra)
@@ -407,12 +409,23 @@ class Scout:
             out.append((url, snippet))
         return out
 
+    def _fallback_paths(self) -> tuple[str, ...]:
+        if self._search_locale()[0] == "es":
+            return FALLBACK_SITE_PATHS_ES + FALLBACK_SITE_PATHS
+        return FALLBACK_SITE_PATHS
+
+    def _search_locale(self) -> tuple[str, str]:
+        """icp.language and icp.country, for search engines that take them."""
+        icp = getattr(getattr(self, "config", None), "icp", None)
+        return getattr(icp, "language", "en") or "en", getattr(icp, "country", "") or ""
+
     async def _search_serper(self, query: str, api_key: str) -> list[tuple[str, str]]:
         """Search via Serper.dev API — most reliable, $5/mo for 2.5k searches."""
         resp = await self._fetch(
             "https://google.serper.dev/search",
             method="POST",
-            json_body={"q": query, "num": min(MAX_RESULTS_PER_QUERY, SERPER_MAX_NUM)},
+            json_body={"q": query, "num": min(MAX_RESULTS_PER_QUERY, SERPER_MAX_NUM),
+                       **serper_locale(*self._search_locale())},
             headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
             retries=2,
         )
@@ -1443,7 +1456,7 @@ Respond ONLY with the JSON array."""
 
         links = people_mod.menu_links(home_text, home_url, limit=MAX_SITE_PAGES - 1)
         if len(links) < 2:
-            links += [f"{base}{p}" for p in FALLBACK_SITE_PATHS]
+            links += [f"{base}{p}" for p in self._fallback_paths()]
         for url in links:
             if len(site["pages"]) >= MAX_SITE_PAGES:
                 break

@@ -559,3 +559,62 @@ async def test_template_lines_with_merge_tags_are_recognised_when_quoted(state):
     handler.brain = RecordingBrain("interested")
     await handler._run_native()
     assert handler.brain.prompts  # our pitch's "attorney" didn't escalate
+
+
+# ── Spanish replies ──
+
+ES_LINE = 'Si no te interesa, responde "no gracias" y no vuelvo a escribirte.'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [
+    "No gracias.",
+    "No, gracias",
+    "Por favor dame de baja de su lista.",
+    "Quiero darme de baja.",
+    "Ya no me envíe más correos.",
+    "No me escriba otra vez, por favor.",
+    "Gracias, pero no me interesa.",
+    "Dejen de escribirme.",
+    "BAJA",
+    "alto",
+    "No gracias\n\nEnviado desde mi iPhone",
+    "El mar, 3 de junio, Harvey escribió:\n> ¿Te late una llamada?\nno me interesa",
+], ids=["no-gracias", "comma", "dame-de-baja", "darme-de-baja", "accents", "no-me-escriba",
+        "no-me-interesa", "dejen", "bare-baja", "bare-alto", "mobile-signature", "under-header"])
+async def test_spanish_opt_outs_are_caught_without_the_model(state, body):
+    status, prompts = await _reply_after_sending(state, body, line=ES_LINE)
+    assert status == "opted_out" and prompts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [
+    "Hola, sácame de dudas: ¿cuánto cobran por la renta?",
+    "No, gracias a ti por escribir. Sí me interesa, ¿hablamos el jueves?",
+    "¿Sí o no, gracias? Avísame.",
+    "El local está en la parte alta de la colonia, ¿lo podemos ver?",
+    "Hay mucha demanda en la zona, ¿cuándo vemos opciones?",
+], ids=["sacame-de-dudas", "gracias-a-ti", "si-o-no", "alta", "demanda"])
+async def test_spanish_words_that_arent_opt_outs_go_to_the_model(state, body):
+    status, prompts = await _reply_after_sending(state, body, line=ES_LINE)
+    assert status != "opted_out" and prompts
+
+
+@pytest.mark.asyncio
+async def test_our_quoted_spanish_footer_is_not_an_opt_out(state):
+    status, prompts = await _reply_after_sending(
+        state, f"Me interesa, ¿hablamos?\n\nEl mar, Harvey escribió:\n> Una nota.\n> {ES_LINE}",
+        sent_bodies=[f"Una nota.\n\n{ES_LINE}"], line=ES_LINE)
+    assert status != "opted_out" and prompts
+
+
+@pytest.mark.asyncio
+async def test_a_spanish_legal_threat_escalates(state):
+    status, prompts = await _reply_after_sending(
+        state, "Mi abogado se pondrá en contacto. Voy a denunciar esto ante Profeco.",
+        line=ES_LINE)
+    assert status != "opted_out" and prompts == []
+
+
+def test_the_spanish_opt_out_line_is_accepted():
+    assert ComplianceConfig(opt_out_line=ES_LINE).opt_out_line == ES_LINE

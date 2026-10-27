@@ -168,7 +168,7 @@ def _is_name_token(token: str) -> bool:
 # Block-level tags separate a name, its title, and the bio that follows; the
 # first text chunk after the name heading is the title, nothing further.
 _BLOCK_BREAK = re.compile(r"(?i)<(?:/?(?:p|div|li|ul|ol|section|article|td|tr)\b[^>]*|br\s*/?)>")
-_CONNECTORS = frozenset("of and the for & to in at".split())
+_CONNECTORS = frozenset("of and the for & to in at de del la las los y e en para".split())
 
 
 def _title_chunks(raw_after: str) -> list[str]:
@@ -200,6 +200,9 @@ DECISION_MAKER_TITLES = (
     "office manager", "marketing director", "marketing manager",
     "director of marketing", "vice president", "vp ", "managing director",
     "chief", "director",
+    "dueño", "dueña", "propietario", "propietaria", "fundador", "fundadora",
+    "director general", "directora general", "gerente general", "presidente",
+    "presidenta", "socio", "socia",
 )
 
 
@@ -210,7 +213,10 @@ ROLE_HINT = re.compile(
     r"office|project|account|service|technician|installer|inspector|"
     r"vice president|vp|executive|lead|head of|chief|proprietor|attorney|lawyer|"
     r"dentist|orthodontist|periodontist|endodontist|hygienist|dds|dmd|esq|cpa|"
-    r"administrator|paralegal|associate|co-?owner|co-?founder)\b", re.I)
+    r"administrator|paralegal|associate|co-?owner|co-?founder|"
+    r"due[ñn][oa]|propietari[oa]|co-?fundador[a]?|fundador[a]?|director[a]?|president[ea]|"
+    r"gerente|soci[oa]|asesor[a]?|agente|abogad[oa]|contador[a]?|coordinador[a]?|"
+    r"ventas|administrador[a]?|ejecutiv[oa])\b", re.I)
 
 
 def title_looks_like_role(text: str) -> bool:

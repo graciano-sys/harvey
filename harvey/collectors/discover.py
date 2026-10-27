@@ -384,6 +384,8 @@ class DiscoveryQuery:
     depth: int = 30                  # SERP depth; ignored by listings providers
     limit: int = 100                 # max records to take from one query
     preset: str = ""                 # PRESETS key that built it, if any
+    language: str = "en"             # icp.language: the language searched in
+    country: str = ""                # icp.country, two letters; blank = US
 
     def keyword(self) -> str:
         return f"{self.term} {self.location}".strip()
@@ -412,8 +414,11 @@ US_STATES = {
 _US_STATE_NAMES = {v.lower(): v for v in US_STATES.values()}
 
 # DataForSEO requires a location on every SERP task. A search with no place
-# at all (the non-local YC preset) is a United States search.
+# at all (the non-local YC preset) is a search in icp.country, else the
+# United States.
 DEFAULT_LOCATION_CODE = 2840
+COUNTRY_LOCATION_CODES = {"us": 2840, "mx": 2484, "es": 2724, "co": 2170,
+                          "ar": 2032, "cl": 2152, "pe": 2604, "ca": 2124}
 
 
 def dataforseo_location_name(place: str) -> str:
@@ -440,7 +445,7 @@ def _dfs_location(query: "DiscoveryQuery", point_suffix: str) -> dict:
             return {"location_coordinate": f"{lat.strip()},{lng.strip()},{point_suffix}"}
     if query.location:
         return {"location_name": dataforseo_location_name(query.location)}
-    return {"location_code": DEFAULT_LOCATION_CODE}
+    return {"location_code": COUNTRY_LOCATION_CODES.get(query.country, DEFAULT_LOCATION_CODE)}
 
 
 # ── Provider adapters ─────────────────────────────────────────────────
@@ -667,7 +672,7 @@ class DataForSEOSerp(DiscoveryProvider):
     async def fetch(self, client, env, query):
         keyword = query.keyword()
         items = await self._post(client, env, "serp/google/organic/live/advanced", {
-            "keyword": keyword, "language_code": "en", "depth": query.depth,
+            "keyword": keyword, "language_code": query.language or "en", "depth": query.depth,
             "device": "desktop", **_dfs_location(query, self.POINT_RADIUS)})
 
         # One Business per identity: a company in the pack AND at organic 14
@@ -747,7 +752,7 @@ class DataForSEOMaps(DataForSEOSerp):
     async def fetch(self, client, env, query):
         keyword = query.keyword()
         items = await self._post(client, env, "serp/google/maps/live/advanced", {
-            "keyword": keyword, "language_code": "en", "depth": query.depth,
+            "keyword": keyword, "language_code": query.language or "en", "depth": query.depth,
             **_dfs_location(query, self.ZOOM)})
         out = []
         for item in items:
@@ -829,7 +834,8 @@ class Serper(DiscoveryProvider):
                      "Content-Type": "application/json"},
             # Free accounts reject num > 10 (HTTP 400 "Query pattern not
             # allowed for free accounts"), verified 2026-10-26.
-            json={"q": query.keyword(), "num": max(1, min(query.depth, 10))},
+            json={"q": query.keyword(), "num": max(1, min(query.depth, 10)),
+                  **serper_locale(query.language, query.country)},
         )
         r.raise_for_status()
         data = r.json()
@@ -1598,6 +1604,16 @@ def preset_problem(preset: str, provider_key: str, config=None) -> str | None:
     return None
 
 
+def serper_locale(language: str, country: str) -> dict:
+    """Serper's hl/gl, only when they differ from its English/US default."""
+    out = {}
+    if language and language != "en":
+        out["hl"] = language
+    if country and country != "us":
+        out["gl"] = country
+    return out
+
+
 def build_queries(config, cities: list[str] | None = None,
                   depth: int = 30, limit: int = 100, preset: str = "") -> list[DiscoveryQuery]:
     """Turn the configured ICP into a concrete query list.
@@ -1627,10 +1643,13 @@ def build_queries(config, cities: list[str] | None = None,
             v.strip() for t in terms for v in [t, *variants.get(t, [])] if v.strip()))
         places = cities if cities is not None else list(icp.geography) or [""]
     coords = getattr(icp, "geo_coordinates", {}) or {}
+    language = (getattr(icp, "language", "") or "en").lower()
+    country = (getattr(icp, "country", "") or "").lower()
 
     return [
         DiscoveryQuery(term=term, location=place, depth=depth, limit=limit,
-                       coordinate=coords.get(place, ""), preset=preset if spec else "")
+                       coordinate=coords.get(place, ""), preset=preset if spec else "",
+                       language=language, country=country)
         for term in terms
         for place in places
     ]

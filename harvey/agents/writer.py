@@ -15,7 +15,7 @@ import re
 from datetime import datetime, timezone
 
 from harvey.brain import Brain
-from harvey.config import HarveyConfig
+from harvey.config import HarveyConfig, writing_language_rule
 from harvey.humanize import humanize, humanizer_enabled
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS
 from harvey.models.campaign import Campaign, EmailStep
@@ -323,6 +323,7 @@ class Writer:
             persona_role=self.config.persona.role,
             persona_tone=self.config.persona.tone,
         ) or ""
+        prompt += writing_language_rule(self.config)
         if self.skills:
             prompt += "\n\n" + self.skills
         if startup is not None:
@@ -405,6 +406,7 @@ Product: {self.config.product.name}
 Description: {self.config.product.description}
 Key benefits: {', '.join(self.config.product.key_benefits)}
 Pricing: {self.config.product.pricing}"""
+        prompt += writing_language_rule(self.config)
 
         # Inject email framework skills
         if self.skills:

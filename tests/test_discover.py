@@ -1454,7 +1454,8 @@ async def test_scout_serper_caps_request(monkeypatch):
     async def fetch(url, **kwargs):
         requests.append(kwargs["json_body"])
         return httpx.Response(200, json={"organic": []})
-    await Scout._search_serper(SimpleNamespace(_fetch=fetch), "roofer", "fixture")
+    scout = SimpleNamespace(_fetch=fetch, _search_locale=lambda: ("en", ""))
+    await Scout._search_serper(scout, "roofer", "fixture")
     assert requests == [{"q": "roofer", "num": 10}]
 
 
